@@ -1,0 +1,397 @@
+---
+title: "TRABALHO DE IAA005 – Estatística Aplicada II"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+encoding: UTF-8
+geometry: left=2cm, right=2cm, top=1cm, bottom=1cm, landscape
+---
+
+### Equipe 03:
+
+-   Gustavo Costa de Souza
+-   Marcos Vinicius de Melo
+-   Marcus Eneas Silveira Galvao do Rio Apa II
+-   Patricia Verdugo Pascoal
+-   Rodrigo de Araujo
+-   William de Souza Alencar
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1 Regressões Ridge, Lasso e ElasticNet
+
+Instalando e carregando os pacotes necessários.
+
+```{r echo=FALSE}
+set.seed(302)
+
+pacotes <- c("plyr","readr","dplyr","caret",
+             "ggplot2","repr","glmnet")
+
+# Instalando e carregando os pacotes necessarios
+if(sum(as.numeric(!pacotes %in% installed.packages()))!=0){
+  instalador <- pacotes[!pacotes %in% installed.packages()]
+  for(i in 1:length(instalador)) {
+    install.packages(instalador, dependencies = T)
+    break()}
+  sapply(pacotes, require, character = T)
+} else {
+  sapply(pacotes, require, character = T)
+}
+```
+Carregando a base de dados.
+
+```{r}
+
+load("trabalhosalarios.RData")
+
+glimpse(trabalhosalarios)
+
+```
+Visualizando estatisticas do DF.
+
+```{r}
+summary(trabalhosalarios)
+```
+Particionamento do dataset, 80% para treinamento e 20% para teste.
+
+```{r}
+indexes <- sample(1:nrow(trabalhosalarios), 0.8*nrow(trabalhosalarios))
+
+train <- trabalhosalarios[indexes,]
+test <- trabalhosalarios[-indexes,]
+
+```
+
+Padronização de variáveis, excluindo as binárias.
+normalização Z-score:
+"center": centraliza os dados, subtraindo a média de cada variável.
+"scale": normaliza os dados, dividindo pelo desvio padrão.
+
+```{r}
+non_binary_columns = c('husage', 'husearns', 'huseduc', 'hushrs', 'earns', 'age', 'educ', 'exper', 'lwage')
+
+# os parâmetros de padronização consideram apenas o conjuto de treinamento pois o modelo aprenderá a transformação apenas com os dados conhecidos e aplicará a mesma regra em dados novos.
+pre_process_normalization_object = caret::preProcess(train[,non_binary_columns], method=c("center", "scale"))
+
+# aplica os parâmentos de normalização nos dados
+train[, non_binary_columns] = predict(pre_process_normalization_object, train[,non_binary_columns])
+test[, non_binary_columns] = predict(pre_process_normalization_object, test[,non_binary_columns])
+
+print('Visualizando estatisticas da base de trainamento.')
+summary(train)
+print('Visualizando estatisticas da base de test.')
+summary(test)
+```
+
+
+### Regressão Ridge
+
+Realizando o one-hot encoding das variáveis categoricas, para este caso já estão no formato one-hot.
+
+Criando as matrizes de treinamento, e test e vetores da variáveis dependente de treinamento e teste.
+```{r}
+cols_reg <- c('husage', 'husearns', 'huseduc', 'hushrs', 'earns', 'age', 'educ', 'exper','lwage',
+             'husunion', 'husblck', 'hushisp', 'kidge6', 'black', 'hispanic',
+             'union', 'kidlt6')
+
+one_hot_encoding <- dummyVars(lwage~husage+husearns+huseduc+hushrs+
+                       earns+age+educ+exper+husunion+husblck+hushisp+
+                       kidge6+black+hispanic+union+kidlt6, 
+                     data = trabalhosalarios[,cols_reg])
+train_encoded = predict(one_hot_encoding, newdata = train[,cols_reg])
+test_encoded = predict(one_hot_encoding, newdata = test[,cols_reg])
+
+x_train = as.matrix(train_encoded)
+y_train = train$lwage
+
+x_test = as.matrix(test_encoded)
+y_test = test$lwage
+
+```
+Calculando o melhor lambda
+
+```{r}
+lambdas <- 10^seq(2, -3, by = -.1)
+
+# Calculando o lambda:
+ridge_lamb <- cv.glmnet(x_train, y_train, alpha = 0, lambda = lambdas)
+
+best_lambda_ridge <- ridge_lamb$lambda.min
+cat('Melhor parâmetro lambda para o modelo Ridge: ', best_lambda_ridge, '\n\n')
+
+```
+
+Treinando o modelo Ridge
+
+```{r}
+ridge_reg = glmnet(x_train, y_train, nlambda = 25, alpha = 0, 
+                   family = 'gaussian', 
+                   lambda = best_lambda_ridge)
+```
+
+Parâmetros do modelo treinado
+
+```{r}
+ridge_reg[["beta"]]
+```
+
+
+```{r}
+eval_results <- function(true, predicted, df, modelName, phase) {
+  SSE <- sum((predicted - true)^2)
+  SST <- sum((true - mean(true))^2)
+  R_square <- 1 - SSE / SST
+  RMSE = sqrt(SSE/nrow(df))
+  
+  # As metricas de performace do modelo:
+  data.frame(
+    ModelName = modelName,
+    Phase = phase,
+    RMSE = RMSE,
+    Rsquare = R_square
+  )
+}
+```
+
+Estatisticas do modelo Ridge na base de treinamento e teste.
+```{r}
+
+models_stats <- data.frame(
+  ModelName = character(),
+  Phase = character(),
+  RMSE = numeric(),
+  Rsquare = numeric(),
+  stringsAsFactors = FALSE
+)
+
+predictions_train <- predict(ridge_reg, 
+                             s = best_lambda_ridge,
+                             newx = x_train)
+
+ridge_train_eval_results <- eval_results(y_train, predictions_train, train, 'Ridge', 'train')
+models_stats <- rbind(models_stats, ridge_train_eval_results)
+
+predictions_test <- predict(ridge_reg, 
+                            s = best_lambda_ridge, 
+                            newx = x_test)
+
+ridge_test_eval_results = eval_results(y_test, predictions_test, test, 'Ridge', 'test')
+models_stats <- rbind(models_stats, ridge_test_eval_results)
+
+models_stats
+```
+
+Criando o dataframe de predição para e realizando a normalização.
+
+```{r}
+predicao_df <- trabalhosalarios[0, ]
+
+predicao_df <- data.frame(
+  husage=40, 
+  husunion=0,
+  husearns=600,
+  huseduc=13,
+  husblck=1,
+  hushisp=0,
+  hushrs=40,
+  kidge6=1,
+  earns=600,
+  age=38,
+  black=0,
+  educ=13,
+  hispanic=1,
+  union=0,
+  exper=18,
+  kidlt6=1,
+  lwage=0
+)
+
+predicao_df[, non_binary_columns] = predict(pre_process_normalization_object, predicao_df[,non_binary_columns])
+
+summary(predicao_df)
+```
+Realização da predição no modelo ridge
+
+```{r}
+pred_matrix <- as.matrix(predicao_df[,!(names(predicao_df) %in% "lwage")])
+
+pred_ridge <- predict(ridge_reg, s=best_lambda_ridge, newx = pred_matrix)
+
+cat("Predição Ridge padronizada:", pred_ridge, "\n")
+
+lwage_pred_ridge=(pred_ridge*
+                   pre_process_normalization_object[["std"]][["lwage"]])+
+                   pre_process_normalization_object[["mean"]][["lwage"]]
+
+cat("Predição Ridge valor nominal porém ainda em logaritmo:", lwage_pred_ridge, "\n")
+
+#antilog
+cat("Predição Ridge valor em dólares:", exp(lwage_pred_ridge), "\n")
+
+```
+Calculando os intervalos de confiança
+
+```{r}
+calculate_intervals <- function(pred, modelName){
+  n <- nrow(train)
+  m <- pred
+  s <- pre_process_normalization_object[["std"]][["lwage"]]
+  dam <- s / sqrt(n)
+  z <- qnorm(0.025)
+  cilwr <- m + z * dam
+  ciupper <- m - z * dam
+  
+  cat("Para o modelo", modelName, "o intervalo de confiança inferior é de: USD", exp(cilwr),"\n" )
+  cat("Para o modelo", modelName, "o intervalo de confiança superior é de: USD", exp(ciupper),"\n" )
+}
+```
+
+```{r}
+calculate_intervals(lwage_pred_ridge, 'Ridge')
+```
+
+Interpretação: O salário hora da a esposa é em média USD 12.15 e pode variar entre USD 11.88 a USD 12.42 com 95% de confiança.
+O modelo Ridge, mantendo todas as variáveis, apresentou uma boa capacidade de generalização e foi consistente entre treinamento e teste. A penalização L2 contribuiu para evitar overfitting.
+
+### Regressão Lasso
+
+```{r}
+# Calculando o lambda:
+lasso_lamb <- cv.glmnet(x_train, y_train, alpha = 1, lambda = lambdas, standardize = TRUE, nfolds = 5)
+
+best_lambda_lasso <- lasso_lamb$lambda.min
+cat('Melhor parâmetro lambda para o modelo Lasso: ', best_lambda_lasso, '\n\n')
+```
+```{r}
+lasso_reg <- glmnet(x_train, y_train, alpha = 1, 
+                      lambda = best_lambda_lasso, 
+                      standardize = TRUE)
+
+lasso_reg[["beta"]]
+```
+```{r}
+predictions_lasso_train <- predict(lasso_reg, 
+                             s = best_lambda_lasso,
+                             newx = x_train)
+
+
+lasso_train_eval_results <- eval_results(y_train, predictions_lasso_train, train, 'Lasso', 'train')
+models_stats <- rbind(models_stats, lasso_train_eval_results)
+
+predictions_lasso_test <- predict(lasso_reg, 
+                            s = best_lambda_lasso, 
+                            newx = x_test)
+
+lasso_test_eval_results <- eval_results(y_test, predictions_lasso_test, test, 'Lasso', 'test')
+models_stats <- rbind(models_stats, lasso_test_eval_results)
+
+models_stats
+
+```
+```{r}
+
+pred_lasso <- predict(lasso_reg, s=best_lambda_lasso, newx = pred_matrix)
+
+cat("Predição Lasso padronizada:", pred_lasso, "\n")
+
+lwage_pred_lasso=(pred_lasso*
+                   pre_process_normalization_object[["std"]][["lwage"]])+
+                   pre_process_normalization_object[["mean"]][["lwage"]]
+
+cat("Predição Lasso valor nominal porém ainda em logaritmo:", lwage_pred_lasso, "\n")
+
+#antilog
+cat("Predição Lasso valor em dólares:", exp(lwage_pred_lasso), "\n")
+
+```
+```{r}
+calculate_intervals(lwage_pred_lasso, 'Lasso')
+```
+Interpretação: O salário hora da a esposa é em média USD 12.67 e pode variar entre USD 12.40 e USD 12.95 com 95% de confiança.
+O modelo Lasso apresentou desempenho muito próximo ao Ridge, como pode ser visto acima o modelo Lasso fez a seleção de variáveis, a penalização L1 foi utilizada para zerar coeficientes não significativos, para este caso foi excluido a variavel 'exper'. 
+
+Comparado ao modelo Ridge teve um desempenho muito semelhante, houve uma pequena melhora no R² de teste, mostrando que a exclusão da váriavel 'exper' não prejudicou o ajuste do modelo.
+
+### Regressão ElasticNet
+
+```{r}
+elasticnet_train_control <- trainControl(method = "repeatedcv",
+                           number = 10,
+                           repeats = 5,
+                           search = "random",
+                           verboseIter = TRUE)
+
+elastic_reg <- train(lwage~husage+husearns+huseduc+hushrs+
+                       earns+age+educ+exper+husunion+husblck+hushisp+
+                       kidge6+black+hispanic+union+kidlt6,
+                     data = train,
+                     method = "glmnet",
+                     tuneLength = 10,
+                     trControl = elasticnet_train_control)
+
+best_apha <- elastic_reg$bestTune
+best_apha
+```
+```{r}
+elastic_reg[["finalModel"]][["beta"]]
+```
+
+
+```{r}
+predictions_elasticnet_train <- predict(elastic_reg, x_train)
+elastic_train_eval_results <- eval_results(y_train, predictions_elasticnet_train, train, 'Elasticnet', 'train')
+models_stats <- rbind(models_stats, elastic_train_eval_results)
+
+predictions_elasticnet_test <- predict(elastic_reg, x_test)
+elastic_test_eval_results <- eval_results(y_test, predictions_elasticnet_test, test, 'Elasticnet', 'test')
+models_stats <- rbind(models_stats, elastic_test_eval_results)
+
+models_stats
+
+```
+
+```{r}
+pred_elastic <- predict(elastic_reg, pred_matrix)
+
+cat("Predição Elasticnet padronizada:", pred_elastic, "\n")
+
+lwage_pred_elastic=(pred_elastic*
+                   pre_process_normalization_object[["std"]][["lwage"]])+
+                   pre_process_normalization_object[["mean"]][["lwage"]]
+
+cat("Predição Elasticnet valor nominal porém ainda em logaritmo:", lwage_pred_elastic, "\n")
+
+#antilog
+cat("Predição Elasticnet valor em dólares:", exp(lwage_pred_elastic), "\n")
+
+```
+```{r}
+calculate_intervals(lwage_pred_elastic, 'Elasticnet')
+```
+
+
+Interpretação: O salário hora da a esposa é em média USD 13.05 e pode variar entre USD 12.76 a USD 13.33 com 95% de confiança.
+Com combinação das penalizações L1 e L2 o modelo Elasticnet beneficia-se da seleção de variáveis do Lasso e da estabilidade do Ridge, ainda sim as estatisticas do modelo são muito semelhates a dos modelos Ridge e Lasso.
+
+
+### Estatísticas dos modelos
+
+
+Estatísticas dos modelos Ridge, Lasso e Elasticnet nas fases de treinamento e teste.
+
+```{r}
+models_stats
+```
+
+
+### Conclusão
+
+Definição:
+RMSE - Quanto MENOR, MELHOR (menos erro).
+R2 - Quanto MAIOR, MELHOR (mais explicação).
+
+Os três modelos apresentaram desempenho praticamente idênticos em termos de erro(RMSE) e explicação(Rsquare). O modelo Elasticnet se destaca pois apresentou um melhor poder de generalização para novos dados, apresentando o menor RMSE e maior explicação R² nos testes, indicando uma ligeira vantangem estatistica, além disso combinar as penalizações L1 e L2 o modelo geralmente produz um melhor balanço entre viés e variancia (tradeoff). 
