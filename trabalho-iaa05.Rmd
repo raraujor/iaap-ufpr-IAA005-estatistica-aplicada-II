@@ -19,6 +19,7 @@ geometry: left=2cm, right=2cm, top=1cm, bottom=1cm, landscape
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+Sys.setlocale(category = "LC_ALL", locale = "pt_BR.UTF-8")
 ```
 
 ## 1 Regressões Ridge, Lasso e ElasticNet
@@ -72,7 +73,7 @@ normalização Z-score:
 "scale": normaliza os dados, dividindo pelo desvio padrão.
 
 ```{r}
-non_binary_columns = c('husage', 'husearns', 'huseduc', 'hushrs', 'earns', 'age', 'educ', 'exper', 'lwage')
+non_binary_columns = c('husage', 'husearns', 'huseduc', 'hushrs', 'earns', 'age', 'educ', 'exper')
 
 # os parâmetros de padronização consideram apenas o conjuto de treinamento pois o modelo aprenderá a transformação apenas com os dados conhecidos e aplicará a mesma regra em dados novos.
 pre_process_normalization_object = caret::preProcess(train[,non_binary_columns], method=c("center", "scale"))
@@ -112,7 +113,8 @@ x_test = as.matrix(test_encoded)
 y_test = test$lwage
 
 ```
-Calculando o melhor lambda
+
+Calculando o melhor lambda para o modelo Ridge
 
 ```{r}
 lambdas <- 10^seq(2, -3, by = -.1)
@@ -185,7 +187,7 @@ models_stats <- rbind(models_stats, ridge_test_eval_results)
 models_stats
 ```
 
-Criando o dataframe de predição para e realizando a normalização.
+Criando o dataframe de predição para e realizando a normalização dos dados.
 
 ```{r}
 predicao_df <- trabalhosalarios[0, ]
@@ -206,8 +208,7 @@ predicao_df <- data.frame(
   hispanic=1,
   union=0,
   exper=18,
-  kidlt6=1,
-  lwage=0
+  kidlt6=1
 )
 
 predicao_df[, non_binary_columns] = predict(pre_process_normalization_object, predicao_df[,non_binary_columns])
@@ -221,16 +222,10 @@ pred_matrix <- as.matrix(predicao_df[,!(names(predicao_df) %in% "lwage")])
 
 pred_ridge <- predict(ridge_reg, s=best_lambda_ridge, newx = pred_matrix)
 
-cat("Predição Ridge padronizada:", pred_ridge, "\n")
-
-lwage_pred_ridge=(pred_ridge*
-                   pre_process_normalization_object[["std"]][["lwage"]])+
-                   pre_process_normalization_object[["mean"]][["lwage"]]
-
-cat("Predição Ridge valor nominal porém ainda em logaritmo:", lwage_pred_ridge, "\n")
+cat("Predição Ridge valor nominal porém ainda em logaritmo:", pred_ridge, "\n")
 
 #antilog
-cat("Predição Ridge valor em dólares:", exp(lwage_pred_ridge), "\n")
+cat("Predição Ridge valor em dólares (anti-log):", exp(pred_ridge), "\n")
 
 ```
 Calculando os intervalos de confiança
@@ -239,7 +234,7 @@ Calculando os intervalos de confiança
 calculate_intervals <- function(pred, modelName){
   n <- nrow(train)
   m <- pred
-  s <- pre_process_normalization_object[["std"]][["lwage"]]
+  s <- sd(train$lwage)
   dam <- s / sqrt(n)
   z <- qnorm(0.025)
   cilwr <- m + z * dam
@@ -251,7 +246,7 @@ calculate_intervals <- function(pred, modelName){
 ```
 
 ```{r}
-calculate_intervals(lwage_pred_ridge, 'Ridge')
+calculate_intervals(pred_ridge, 'Ridge')
 ```
 
 Interpretação: O salário hora da a esposa é em média USD 12.15 e pode variar entre USD 11.88 a USD 12.42 com 95% de confiança.
@@ -296,22 +291,16 @@ models_stats
 
 pred_lasso <- predict(lasso_reg, s=best_lambda_lasso, newx = pred_matrix)
 
-cat("Predição Lasso padronizada:", pred_lasso, "\n")
-
-lwage_pred_lasso=(pred_lasso*
-                   pre_process_normalization_object[["std"]][["lwage"]])+
-                   pre_process_normalization_object[["mean"]][["lwage"]]
-
-cat("Predição Lasso valor nominal porém ainda em logaritmo:", lwage_pred_lasso, "\n")
+cat("Predição Lasso valor nominal porém ainda em logaritmo:", pred_lasso, "\n")
 
 #antilog
-cat("Predição Lasso valor em dólares:", exp(lwage_pred_lasso), "\n")
+cat("Predição Lasso valor em dólares:", exp(pred_lasso), "\n")
 
 ```
 ```{r}
-calculate_intervals(lwage_pred_lasso, 'Lasso')
+calculate_intervals(pred_lasso, 'Lasso')
 ```
-Interpretação: O salário hora da a esposa é em média USD 12.67 e pode variar entre USD 12.40 e USD 12.95 com 95% de confiança.
+Interpretação: O salário hora da a esposa é em média USD 12.83 e pode variar entre USD 12.55 e USD 13.11 com 95% de confiança.
 O modelo Lasso apresentou desempenho muito próximo ao Ridge, como pode ser visto acima o modelo Lasso fez a seleção de variáveis, a penalização L1 foi utilizada para zerar coeficientes não significativos, para este caso foi excluido a variavel 'exper'. 
 
 Comparado ao modelo Ridge teve um desempenho muito semelhante, houve uma pequena melhora no R² de teste, mostrando que a exclusão da váriavel 'exper' não prejudicou o ajuste do modelo.
@@ -357,24 +346,18 @@ models_stats
 ```{r}
 pred_elastic <- predict(elastic_reg, pred_matrix)
 
-cat("Predição Elasticnet padronizada:", pred_elastic, "\n")
-
-lwage_pred_elastic=(pred_elastic*
-                   pre_process_normalization_object[["std"]][["lwage"]])+
-                   pre_process_normalization_object[["mean"]][["lwage"]]
-
-cat("Predição Elasticnet valor nominal porém ainda em logaritmo:", lwage_pred_elastic, "\n")
+cat("Predição Elasticnet valor nominal porém ainda em logaritmo:", pred_elastic, "\n")
 
 #antilog
-cat("Predição Elasticnet valor em dólares:", exp(lwage_pred_elastic), "\n")
+cat("Predição Elasticnet valor em dólares:", exp(pred_elastic), "\n")
 
 ```
 ```{r}
-calculate_intervals(lwage_pred_elastic, 'Elasticnet')
+calculate_intervals(pred_elastic, 'Elasticnet')
 ```
 
 
-Interpretação: O salário hora da a esposa é em média USD 13.05 e pode variar entre USD 12.76 a USD 13.33 com 95% de confiança.
+Interpretação: O salário hora da a esposa é em média USD 12.51 e pode variar entre USD 12.24 a USD 12.79 com 95% de confiança.
 Com combinação das penalizações L1 e L2 o modelo Elasticnet beneficia-se da seleção de variáveis do Lasso e da estabilidade do Ridge, ainda sim as estatisticas do modelo são muito semelhates a dos modelos Ridge e Lasso.
 
 
@@ -394,4 +377,7 @@ Definição:
 RMSE - Quanto MENOR, MELHOR (menos erro).
 R2 - Quanto MAIOR, MELHOR (mais explicação).
 
-Os três modelos apresentaram desempenho praticamente idênticos em termos de erro(RMSE) e explicação(Rsquare). O modelo Elasticnet se destaca pois apresentou um melhor poder de generalização para novos dados, apresentando o menor RMSE e maior explicação R² nos testes, indicando uma ligeira vantangem estatistica, além disso combinar as penalizações L1 e L2 o modelo geralmente produz um melhor balanço entre viés e variancia (tradeoff). 
+Obs.: A variável explicativa lwage não foi normalizada, pois foram realizados testes com e sem sua normalização, e observou-se que, ao normalizá-la, os erros aumentaram em cerca de 50%
+
+Os três modelos apresentaram desempenho praticamente idêntico em termos de erro de predição e poder explicativo (R²). Porém, ao considerar outros critérios como simplicidade e interpretabilidade, o modelo Lasso se destaca como a melhor escolha para este caso. 
+O modelo Lasso se destaca pois apresentou um melhor poder de generalização para novos dados, apresentando ligeiramente menor RMSE e maior explicação R² nos testes, indicando uma ligeira vantangem estatistica, além disso por sua simplicidade e combinar a penalização L2 é capaz de elimiar variáveis irrelevantes e redução de overfitting.
